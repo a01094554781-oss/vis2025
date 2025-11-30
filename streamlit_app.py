@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import numpy as np
+import os  # 경로 설정을 위해 추가
 
 # ---------------------------------------------------------
 # 1. 페이지 설정
@@ -14,31 +15,44 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# 2. 데이터 로드 및 전처리
+# 2. 데이터 로드 및 전처리 (경로 문제 해결 버전)
 # ---------------------------------------------------------
-import os  # 맨 위에 이 줄이 없으면 추가해주세요!
-
-# ... (중략)
-
 @st.cache_data
 def load_and_process_data():
-    # 1. 경로 문제 해결: 현재 app.py가 있는 폴더 위치를 알아냅니다.
+    # [핵심 수정] 현재 app.py가 있는 폴더 위치를 기준으로 파일을 찾습니다.
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    # 2. 파일 이름 설정 (이름을 festival.csv 로 바꿨다고 가정)
-    file_path = os.path.join(current_dir, 'festival.csv')
+    file_path = os.path.join(current_dir, 'festival.csv')  # 바꾼 파일명
 
-    # 3. 파일 읽기
-    try:
-        # 파일이 있는지 먼저 확인
-        if not os.path.exists(file_path):
-            st.error(f"❌ 파일을 찾을 수 없습니다: {file_path}")
+    # 파일이 실제로 있는지 확인 (안전장치)
+    if not os.path.exists(file_path):
+        # festival.csv가 없으면 원래 이름도 한번 찾아봅니다.
+        file_path_old = os.path.join(current_dir, '2025년 지역축제.CSV')
+        if os.path.exists(file_path_old):
+            file_path = file_path_old
+        else:
+            st.error(f"❌ 파일을 찾을 수 없습니다! 파일명을 'festival.csv'로 변경해서 app.py와 같은 폴더에 넣어주세요.")
             st.stop()
-            
+
+    # 1. 파일 읽기
+    try:
         df = pd.read_csv(file_path, encoding='cp949')
     except:
         df = pd.read_csv(file_path, encoding='utf-8')
 
-    # ... (이후 코드는 동일)
+    # 2. 컬럼명 공백 제거 (오류 방지)
+    df.columns = df.columns.str.replace(' ', '').str.strip()
+
+    # 3. '외국인(명)' 데이터 전처리
+    # 파일의 컬럼명이 '외국인(명)'인지 '외국인'인지 확인하여 처리
+    target_col = '외국인(명)' if '외국인(명)' in df.columns else '외국인'
+    
+    if target_col in df.columns:
+        # 문자열로 변환 후 콤마, 미집계 제거 -> 숫자 변환
+        df['visitors_foreign'] = df[target_col].astype(str).str.replace(',', '').str.replace('미집계', '0').str.replace('최초행사', '0')
+        df['visitors_foreign'] = pd.to_numeric(df['visitors_foreign'], errors='coerce').fillna(0).astype(int)
+    else:
+        df['visitors_foreign'] = 0
+
     # 4. '시작월' 데이터 전처리
     if '시작월' in df.columns:
         df['month'] = pd.to_numeric(df['시작월'], errors='coerce').fillna(0).astype(int)
@@ -51,7 +65,7 @@ def load_and_process_data():
 
     return df
 
-# 지역별 중심 좌표
+# 지역별 중심 좌표 매핑
 lat_lon_dict = {
     '서울': [37.5665, 126.9780], '부산': [35.1796, 129.0756], '대구': [35.8714, 128.6014],
     '인천': [37.4563, 126.7052], '광주': [35.1595, 126.8526], '대전': [36.3504, 127.3845],
@@ -68,18 +82,19 @@ try:
     region_col = '광역자치단체명' if '광역자치단체명' in df.columns else '시도'
     
     if region_col in df.columns:
+        # 지역명 앞 2글자 매핑
         df['lat_base'] = df[region_col].astype(str).str[:2].map(lambda x: lat_lon_dict.get(x, [36.5, 127.5])[0])
         df['lon_base'] = df[region_col].astype(str).str[:2].map(lambda x: lat_lon_dict.get(x, [36.5, 127.5])[1])
         
-        # 랜덤 노이즈 추가 (겹침 방지)
+        # 겹침 방지 (Jitter)
         df['lat'] = df['lat_base'] + np.random.normal(0, 0.04, len(df))
         df['lon'] = df['lon_base'] + np.random.normal(0, 0.04, len(df))
     else:
-        st.error("Error: '광역자치단체명' column not found in CSV.")
+        st.error("CSV 파일에 지역명 컬럼('광역자치단체명')이 없습니다.")
         st.stop()
 
 except Exception as e:
-    st.error(f"Data Load Error: {e}")
+    st.error(f"데이터 로드 중 오류가 발생했습니다: {e}")
     st.stop()
 
 # ---------------------------------------------------------
@@ -88,7 +103,7 @@ except Exception as e:
 st.sidebar.header("🔍 Festival Finder")
 
 # 필터 1: 월
-selected_month = st.sidebar.slider("When will you visit?", 1, 12, 10)
+selected_month = st.sidebar.slider("When will you visit?", 1, 12, 10, format="%d Month")
 
 # 필터 2: 지역
 regions = ['All'] + sorted(list(df[region_col].unique()))
@@ -152,4 +167,42 @@ with tab2:
         fig.update_layout(yaxis={'categoryorder':'total ascending'})
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("No visitor data
+        st.info("No visitor data available.")
+
+# [Tab 3] 계절 추천
+with tab3:
+    st.subheader("📅 Seasonal Recommendations")
+    def get_season_top3(months):
+        return df[df['month'].isin(months)].sort_values('visitors_foreign', ascending=False).head(3)
+
+    cols = st.columns(4)
+    seasons = {'Spring': [3,4,5], 'Summer': [6,7,8], 'Autumn': [9,10,11], 'Winter': [12,1,2]}
+    
+    for i, (name, months) in enumerate(seasons.items()):
+        with cols[i]:
+            st.markdown(f"#### {name}")
+            for _, row in get_season_top3(months).iterrows():
+                st.write(f"• {row['축제명']}")
+
+# [Tab 4] AI 가이드
+with tab4:
+    st.subheader("🤖 Gemini Travel Assistant")
+    
+    if "messages" not in st.session_state:
+        st.session_state.messages = [{"role": "assistant", "content": "Hello! I'm your K-Festival Guide."}]
+
+    for msg in st.session_state.messages:
+        st.chat_message(msg["role"]).write(msg["content"])
+
+    if prompt := st.chat_input("Ask me anything!"):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        st.chat_message("user").write(prompt)
+        
+        response = "Based on the 2025 festival data..."
+        if "food" in prompt.lower():
+            response = "I recommend the 'Jeonju Bibimbap Festival' in October!"
+        else:
+            response = f"Check the Map tab for more details about '{prompt}'."
+            
+        st.session_state.messages.append({"role": "assistant", "content": response})
+        st.chat_message("assistant").write(response)
