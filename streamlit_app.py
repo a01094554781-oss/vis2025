@@ -16,26 +16,29 @@ st.set_page_config(
 # ---------------------------------------------------------
 # 2. 데이터 로드 및 전처리
 # ---------------------------------------------------------
+import os  # 맨 위에 이 줄이 없으면 추가해주세요!
+
+# ... (중략)
+
 @st.cache_data
 def load_and_process_data():
-    # 1. 파일 읽기 (인코딩 자동 감지)
+    # 1. 경로 문제 해결: 현재 app.py가 있는 폴더 위치를 알아냅니다.
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    # 2. 파일 이름 설정 (이름을 festival.csv 로 바꿨다고 가정)
+    file_path = os.path.join(current_dir, 'festival.csv')
+
+    # 3. 파일 읽기
     try:
-        df = pd.read_csv('2025년 지역축제.CSV', encoding='cp949')
+        # 파일이 있는지 먼저 확인
+        if not os.path.exists(file_path):
+            st.error(f"❌ 파일을 찾을 수 없습니다: {file_path}")
+            st.stop()
+            
+        df = pd.read_csv(file_path, encoding='cp949')
     except:
-        df = pd.read_csv('2025년 지역축제.CSV', encoding='utf-8')
+        df = pd.read_csv(file_path, encoding='utf-8')
 
-    # 2. 컬럼명 공백 제거
-    df.columns = df.columns.str.replace(' ', '').str.strip()
-
-    # 3. '외국인(명)' 데이터 숫자 변환
-    target_col = '외국인(명)' if '외국인(명)' in df.columns else '외국인'
-    
-    if target_col in df.columns:
-        df['visitors_foreign'] = df[target_col].astype(str).str.replace(',', '')
-        df['visitors_foreign'] = pd.to_numeric(df['visitors_foreign'], errors='coerce').fillna(0).astype(int)
-    else:
-        df['visitors_foreign'] = 0
-
+    # ... (이후 코드는 동일)
     # 4. '시작월' 데이터 전처리
     if '시작월' in df.columns:
         df['month'] = pd.to_numeric(df['시작월'], errors='coerce').fillna(0).astype(int)
