@@ -1,7 +1,5 @@
 import streamlit as st
-import pandas as pd
-import plotly.express as px
-import numpy as np
+
 
 # ---------------------------------------------------------
 # 1. 페이지 설정 (외국인 타겟에 맞춘 깔끔한 UI)
